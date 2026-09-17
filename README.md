@@ -92,8 +92,29 @@ In order to build and run the complete app, you need to run the following comman
 
 ```bash
 docker build -t whasync .
-docker run --rm -it -p 80:80 --env-file server/.env whasync
+docker run --rm -it -p 80:10000 --env-file server/.env whasync
 ```
+
+## Deploy on Render
+
+The GitHub Actions workflow publishes the full application to GitHub Container
+Registry after every successful push to `main`. Make the resulting package
+public in GitHub's package settings, then configure a Render **Web Service**
+from the image:
+
+- Image: `ghcr.io/easly1989/whatsapp-contact-sync:latest`
+- Health check path: `/api/`
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`: your Google OAuth values
+- `SESSION_SECRET`: a long, random secret
+- `ENFORCE_PAYMENTS=false`
+
+Render provides `PORT` automatically; do not override it. Add
+`https://whasync-latest.onrender.com/api/google_callback` as an authorized
+redirect URI in the Google Cloud OAuth client.
+
+This service runs the frontend, API and WebSocket in one container. A service
+that sleeps or is restarted ends an in-progress WhatsApp sync, so use an
+always-on host for long synchronizations.
 
 In order to build the seperate images for the backend and frontend, execute the following commands from the projects main directory:
 

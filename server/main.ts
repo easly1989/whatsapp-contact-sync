@@ -6,6 +6,7 @@ import bodyParser from "body-parser";
 import cookieParser from "cookie-parser";
 import session from "express-session";
 import MemoryStore from "memorystore";
+import path from "path";
 
 import winston from "winston";
 import expressWinston from "express-winston";
@@ -15,7 +16,9 @@ import router from "./routes/api";
 let ews = expressWs(express());
 const mStore = MemoryStore(session);
 const app = ews.app;
-const port = 8080;
+// Render (and most container platforms) provide the port at runtime. Keep the
+// local-development default so `npm run dev` continues to work unchanged.
+const port = Number(process.env.PORT) || 8080;
 
 const isProd = process.env.NODE_ENV == "production";
 
@@ -78,8 +81,23 @@ app.use(
 // To fix 304 responses.
 app.disable("etag");
 
-const routePrefix = process.env.ROUTE_PREFIX || "";
+// Keep the public API under /api in every environment. The Vite development
+// proxy forwards this prefix unchanged, matching the production container.
+const routePrefix = process.env.ROUTE_PREFIX || "/api";
 app.use(routePrefix, router);
+
+// The production image puts Vite's built files in `server/public`. Serving
+// them from the same Express process keeps the API, WebSocket and browser on
+// one origin, which is required for the session cookie and Google OAuth flow.
+const webRoot = path.join(__dirname, "../../public");
+app.use(express.static(webRoot));
+app.get("/{*path}", (req: Request, res: Response, next) => {
+  if (req.path.startsWith(`${routePrefix}/`) || req.path === routePrefix) {
+    return next();
+  }
+  res.sendFile(path.join(webRoot, "index.html"));
+});
+
 app.listen(port, "0.0.0.0", () => {
   console.log(`Listening on port ${port}`);
 });

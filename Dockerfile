@@ -1,5 +1,5 @@
 ### Build web files
-FROM node:26-alpine AS web-build
+FROM node:22-alpine AS web-build
 
 WORKDIR /app/web
 
@@ -13,8 +13,8 @@ COPY ./web .
 RUN npm run build
 
 
-### Download server npm modules
-FROM node:26-alpine AS server-build
+### Build server files and production dependencies
+FROM node:22-alpine AS server-build
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD="true"
 ENV PUPPETEER_SKIP_DOWNLOAD="true"
@@ -22,45 +22,33 @@ WORKDIR /app/server
 
 COPY ["server/package.json", "server/package-lock.json*", "./"]
 
-RUN npm ci
+RUN apk add --no-cache git && npm ci
 
 COPY ./interfaces /app/interfaces
 COPY ./server .
 
 RUN npm run build
 
-# Prepare node_modules for docker
-RUN npm prune --production
-RUN apk update && \
-    apk add curl && \
-    curl -sf https://gobinaries.com/tj/node-prune | sh
-
-# The mv is a workaround for this - https://github.com/tj/node-prune/issues/63
-RUN mv node_modules/googleapis/build/src/apis/docs ./docs && \
-    node-prune --exclude "**/googleapis/**/docs/*.js" && \
-    mv ./docs node_modules/googleapis/build/src/apis/docs
+RUN npm prune --omit=dev
 
 
 ### Build final image
-FROM node:26-alpine
-USER root
+FROM node:22-alpine
 
 ENV RUNNING_IN_DOCKER="true"
 WORKDIR /app/server
 
-# Install Chromium
-RUN apk update && \
-    apk add --no-cache nss udev ttf-freefont chromium nginx && \
-    rm -rf /var/cache/apk/* /tmp/*
+# Chromium is used by whatsapp-web.js. Node is the only container process;
+# this lets Render forward SIGTERM cleanly during deploys.
+RUN apk add --no-cache nss udev ttf-freefont chromium
 
-COPY ./assets/nginx.conf /etc/nginx/nginx.conf
-COPY ./assets/entrypoint.sh .
-RUN chmod 755 entrypoint.sh
-
-COPY --from=web-build /app/web/dist /var/www/html
+COPY --from=web-build /app/web/dist ./public
 COPY --from=server-build /app/server/node_modules ./node_modules
 COPY --from=server-build /app/server/build ./build
 
-EXPOSE 80
+ENV NODE_ENV=production
+ENV PORT=10000
 
-ENTRYPOINT ["./entrypoint.sh"]
+EXPOSE 10000
+
+CMD ["node", "build/server/main.js"]
